@@ -1,0 +1,217 @@
+name: Build and release libretro core
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ forgejo.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build and publish libretro cores
+    runs-on: docker
+    container:
+      image: docker.io/messense/cargo-zigbuild@sha256:b8364c2c60cdcc9b95c402d17654bff517410926a35678bd89dd924b8158d6ae
+    steps:
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl file git jq
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Install cargo-xwin
+        run: |
+          set -eu
+          case "$(uname -m)" in
+            x86_64|amd64)
+              archive=cargo-xwin-v0.23.0.x86_64-unknown-linux-musl.tar.gz
+              checksum=74a216f64f10ea81c909f02d6b1a84cd0fda8de4c87ee52fe63ba76ab2392b75
+              ;;
+            aarch64|arm64)
+              archive=cargo-xwin-v0.23.0.aarch64-unknown-linux-musl.tar.gz
+              checksum=6f6e76a680db31556f00f50a6e5741e1cce8704ead943b05b92f78a5c1c2674b
+              ;;
+            *)
+              printf 'unsupported runner architecture: %s\n' "$(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+          url="https://github.com/rust-cross/cargo-xwin/releases/download/v0.23.0/${archive}"
+          curl -fsSL "$url" -o cargo-xwin.tar.gz
+          printf '%s  %s\n' "$checksum" cargo-xwin.tar.gz | sha256sum -c -
+          mkdir cargo-xwin-bin
+          tar -xzf cargo-xwin.tar.gz -C cargo-xwin-bin
+          binary="$(find cargo-xwin-bin -type f -name cargo-xwin -print -quit)"
+          test -n "$binary"
+          install -m 0755 "$binary" /usr/local/cargo/bin/cargo-xwin
+          cargo xwin --version
+
+      - name: Checkout source
+        env:
+          SOURCE_SHA: ${{ forgejo.sha }}
+          SERVER_URL: ${{ forgejo.server_url }}
+          REPOSITORY: ${{ forgejo.repository }}
+        run: |
+          set -eu
+          git init .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "${SERVER_URL}/${REPOSITORY}.git"
+          git fetch --depth=1 origin "$SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Install Rust targets
+        run: |
+          rustup target add \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            armv7-unknown-linux-gnueabihf \
+            x86_64-pc-windows-msvc \
+            aarch64-pc-windows-msvc \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin
+          rustup component add llvm-tools-preview
+
+      - name: Build Linux cores
+        run: |
+          cargo zigbuild --locked --release --target x86_64-unknown-linux-gnu
+          cargo zigbuild --locked --release --target aarch64-unknown-linux-gnu
+          cargo zigbuild --locked --release --target armv7-unknown-linux-gnueabihf
+
+      - name: Build Windows cores
+        run: |
+          cargo xwin build --locked --release --target x86_64-pc-windows-msvc
+          cargo xwin build --locked --release --target aarch64-pc-windows-msvc
+
+      - name: Build macOS cores
+        run: |
+          cargo zigbuild --locked --release --target x86_64-apple-darwin
+          cargo zigbuild --locked --release --target aarch64-apple-darwin
+
+      - name: Stage and verify cores
+        run: |
+          set -eu
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-gnu/release/libez180n.so dist/ez180n_linux_x64.so
+          cp target/aarch64-unknown-linux-gnu/release/libez180n.so dist/ez180n_linux_arm64.so
+          cp target/armv7-unknown-linux-gnueabihf/release/libez180n.so dist/ez180n_linux_arm32.so
+          cp target/x86_64-pc-windows-msvc/release/ez180n.dll dist/ez180n_windows_x64.dll
+          cp target/aarch64-pc-windows-msvc/release/ez180n.dll dist/ez180n_windows_arm64.dll
+          cp target/x86_64-apple-darwin/release/libez180n.dylib dist/ez180n_macos_x64.dylib
+          cp target/aarch64-apple-darwin/release/libez180n.dylib dist/ez180n_macos_arm64.dylib
+          file dist/ez180n_*
+          for core in dist/ez180n_*; do test -s "$core"; done
+          cd dist
+          sha256sum ez180n_* > SHA256SUMS
+
+      - name: Publish Forgejo release
+        env:
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_BASE: ${{ forgejo.server_url }}/api/v1
+          REPOSITORY: ${{ forgejo.repository }}
+          SOURCE_REF: ${{ forgejo.ref }}
+          SOURCE_REF_NAME: ${{ forgejo.ref_name }}
+          SOURCE_SHA: ${{ forgejo.sha }}
+        run: |
+          set -eu
+          test -n "$FORGEJO_TOKEN"
+
+          case "$SOURCE_REF" in
+            refs/tags/v*)
+              release_tag="$SOURCE_REF_NAME"
+              release_name="ez180N $SOURCE_REF_NAME"
+              release_body="Automated libretro core builds for Windows, Linux, and macOS. Verify downloads with SHA256SUMS."
+              rolling=false
+              ;;
+            *)
+              release_tag=nightly
+              release_name="ez180N nightly"
+              release_body="Latest automated libretro core builds from master commit $SOURCE_SHA. Verify downloads with SHA256SUMS."
+              rolling=true
+              ;;
+          esac
+
+          auth="Authorization: token ${FORGEJO_TOKEN}"
+          release_json="$(mktemp)"
+          payload="$(mktemp)"
+
+          if [ "$rolling" = true ]; then
+            status="$(curl -sS -o "$release_json" -w '%{http_code}' -H "$auth" \
+              "$API_BASE/repos/$REPOSITORY/releases/tags/$release_tag")"
+            if [ "$status" = 200 ]; then
+              release_id="$(jq -r '.id' "$release_json")"
+              curl -fsS -X DELETE -H "$auth" \
+                "$API_BASE/repos/$REPOSITORY/releases/$release_id"
+            elif [ "$status" != 404 ]; then
+              printf 'release lookup failed with HTTP %s\n' "$status" >&2
+              cat "$release_json" >&2
+              exit 1
+            fi
+
+            status="$(curl -sS -o /dev/null -w '%{http_code}' -H "$auth" \
+              "$API_BASE/repos/$REPOSITORY/tags/$release_tag")"
+            if [ "$status" = 200 ]; then
+              curl -fsS -X DELETE -H "$auth" \
+                "$API_BASE/repos/$REPOSITORY/tags/$release_tag"
+            elif [ "$status" != 404 ]; then
+              printf 'tag lookup failed with HTTP %s\n' "$status" >&2
+              exit 1
+            fi
+
+            jq -n --arg tag "$release_tag" --arg target "$SOURCE_SHA" \
+              '{tag_name: $tag, target: $target}' > "$payload"
+            curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+              --data-binary "@$payload" "$API_BASE/repos/$REPOSITORY/tags" >/dev/null
+          fi
+
+          jq -n \
+            --arg tag "$release_tag" \
+            --arg name "$release_name" \
+            --arg body "$release_body" \
+            --arg target "$SOURCE_SHA" \
+            '{tag_name: $tag, name: $name, body: $body, target_commitish: $target, draft: false, prerelease: false}' \
+            > "$payload"
+
+          status="$(curl -sS -o "$release_json" -w '%{http_code}' -X POST \
+            -H "$auth" -H 'Content-Type: application/json' --data-binary "@$payload" \
+            "$API_BASE/repos/$REPOSITORY/releases")"
+          if [ "$status" = 409 ]; then
+            curl -fsS -o "$release_json" -H "$auth" \
+              "$API_BASE/repos/$REPOSITORY/releases/tags/$release_tag"
+            release_id="$(jq -r '.id' "$release_json")"
+            curl -fsS -o "$release_json" -X PATCH -H "$auth" -H 'Content-Type: application/json' \
+              --data-binary "@$payload" "$API_BASE/repos/$REPOSITORY/releases/$release_id"
+          elif [ "$status" != 201 ]; then
+            printf 'release creation failed with HTTP %s\n' "$status" >&2
+            cat "$release_json" >&2
+            exit 1
+          fi
+
+          release_id="$(jq -r '.id' "$release_json")"
+          test -n "$release_id"
+          test "$release_id" != null
+
+          for asset in dist/*; do
+            name="$(basename "$asset")"
+            assets_json="$(mktemp)"
+            curl -fsS -o "$assets_json" -H "$auth" \
+              "$API_BASE/repos/$REPOSITORY/releases/$release_id/assets"
+            existing_id="$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' "$assets_json" | head -n 1)"
+            if [ -n "$existing_id" ]; then
+              curl -fsS -X DELETE -H "$auth" \
+                "$API_BASE/repos/$REPOSITORY/releases/$release_id/assets/$existing_id"
+            fi
+            curl -fsS -X POST -H "$auth" -F "attachment=@${asset}" \
+              "$API_BASE/repos/$REPOSITORY/releases/$release_id/assets?name=$name" >/dev/null
+          done

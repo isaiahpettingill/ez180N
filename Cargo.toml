@@ -1,0 +1,24 @@
+[package]
+name = "ez180n"
+version = "0.1.0"
+edition = "2024"
+authors = ["josemancharo"]
+description = "Libretro fantasy console core powered by the ez80 crate"
+license = "BSD-3-Clause-Attribution"
+repository = "https://codeberg.org/josemancharo/ez180N"
+homepage = "https://codeberg.org/josemancharo/ez180N"
+readme = "README.md"
+keywords = ["ez80", "libretro", "fantasy-console", "z80n", "z180"]
+categories = ["emulators", "game-development"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ez80 = "0.4.5"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+panic = "abort"
