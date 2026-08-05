@@ -183,7 +183,7 @@ impl FastBus for Bus {
     }
 
     fn input8(&mut self, port: u16) -> u8 {
-        match port {
+        match port & 0x00FF {
             sdk::PORT_TICK => self.tick,
             sdk::PORT_P1_LOW => self.inputs[0][0],
             sdk::PORT_P1_HIGH => self.inputs[0][1],
@@ -198,7 +198,7 @@ impl FastBus for Bus {
     }
 
     fn output8(&mut self, port: u16, value: u8) {
-        match port {
+        match port & 0x00FF {
             sdk::PORT_PRESENT => self.capture_frame(),
             sdk::PORT_SOUND => self.sound = value,
             _ => {}
@@ -275,5 +275,38 @@ mod tests {
 
         assert!(!console.load_program(b"raw"));
         assert!(!console.load_program(b"EZRA\x06"));
+    }
+
+    #[test]
+    fn console_ports_decode_the_low_byte_of_z80_io_addresses() {
+        let mut bus = Bus::new(MEM_SIZE_16, sdk::FRAMEBUFFER_ADDR_16);
+        bus.tick = 0x42;
+        bus.mem[sdk::FRAMEBUFFER_ADDR_16 as usize] = b'X';
+
+        assert_eq!(bus.input8(0xAB40), 0x42);
+        bus.output8(0x0110, 1);
+
+        assert!(bus.presented);
+        assert_eq!(bus.presented_frame[0], b'X');
+    }
+
+    #[test]
+    fn z80_cartridge_reaches_video_and_tick_ports() {
+        let mut console = Console::new();
+        let cart = [
+            b'E', b'Z', b'R', b'A', 2, // Z80 cartridge prefix
+            0x21, 0x00, 0xE0, // LD HL,$E000
+            0x36, b'X', // LD (HL),'X'
+            0x3E, 0x01, // LD A,1
+            0xD3, 0x10, // OUT ($10),A
+            0xDB, 0x40, // IN A,($40)
+            0x76, // HALT
+        ];
+
+        assert!(console.load_program(&cart));
+        console.run_frame();
+
+        assert_eq!(console.bus.presented_frame[0], b'X');
+        assert_eq!(console.bus.tick, 1);
     }
 }
