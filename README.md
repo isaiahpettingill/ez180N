@@ -4,9 +4,10 @@
 
 ## Machine
 
-- CPU: eZ80 ADL fast path, using the richest currently available `ez80` mode. The target contract reserves opcode space for 8080, 8085, Z80, Z80N, Z180, and eZ80-lineage software.
+- CPU: selected by the cartridge as Intel 8080, Intel 8085, Z80, Z80N, Z180, or eZ80 ADL.
 - Timing: fixed 60 Hz execution, with 200,000 CPU cycles per frame (12 MHz).
-- Framebuffer: `80x56` bytes at `0x080000`; each byte is a CP437 character rendered with the IBM VGA 8x8 font in a 9x9 cell.
+- Memory: 64 KiB for 8080, 8085, Z80, Z80N, and Z180 cartridges; 16 MiB for eZ80 ADL cartridges.
+- Framebuffer: `80x56` bytes at `0xE000` on 16-bit CPUs or `0x080000` on eZ80; each byte is a CP437 character rendered with the IBM VGA 8x8 font in a 9x9 cell.
 - Video output: `720x504` XRGB8888, generated from the character framebuffer when software writes to the present port.
 - Controllers: four SNES-style joypads, exposed as two 8-bit input ports per player for 12 buttons.
 - Audio: write sound IDs `0..255` to the beeper port. `0` is silence; `1..255` select compile-time generated beep, oscillation, pulse, and sine variants.
@@ -33,7 +34,7 @@ Read the frame tick until it changes to wait for the next 60 Hz console tick.
 cargo build --release
 ```
 
-The shared library in `target/release` is the libretro core. ez180N game cartridges use the `.gaem` extension.
+The shared library in `target/release` is the libretro core. ez180N game cartridges use the `.gaem` extension. A cartridge begins with `EZRA`, followed by one CPU byte and then executable code. CPU IDs are `0` for 8080, `1` for 8085, `2` for Z80, `3` for Z80N, `4` for Z180, and `5` for eZ80 ADL.
 
 ## Releases
 

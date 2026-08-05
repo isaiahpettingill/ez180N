@@ -77,7 +77,7 @@ pub extern "C" fn retro_get_system_info(info: *mut retro_system_info) {
         *info = retro_system_info {
             library_name: c"ez180N".as_ptr(),
             library_version: c"0.1.0".as_ptr(),
-            valid_extensions: c"gaem|bin|ezra".as_ptr(),
+            valid_extensions: c"gaem".as_ptr(),
             need_fullpath: false,
             block_extract: false,
         };
@@ -116,17 +116,21 @@ pub extern "C" fn retro_reset() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retro_load_game(game: *const retro_game_info) -> bool {
-    let mut core = Console::new();
-    if !game.is_null() {
-        unsafe {
-            let game = &*game;
-            if !game.data.is_null() && game.size > 0 {
-                let data = core::slice::from_raw_parts(game.data.cast::<u8>(), game.size);
-                core.load_program(data);
-            }
-        }
+    if game.is_null() {
+        return false;
     }
-    unsafe { CORE = Some(core) }
+    let mut core = Console::new();
+    unsafe {
+        let game = &*game;
+        if game.data.is_null() || game.size == 0 {
+            return false;
+        }
+        let data = core::slice::from_raw_parts(game.data.cast::<u8>(), game.size);
+        if !core.load_program(data) {
+            return false;
+        }
+        CORE = Some(core);
+    }
     true
 }
 

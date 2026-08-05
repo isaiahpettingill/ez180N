@@ -1,12 +1,55 @@
-use ez80::{Cpu, FastBus};
+use ez80::{Cpu, CpuMode, FastBus, Reg16};
 
 use crate::{sdk, sound, video};
 
-const MEM_SIZE: usize = 0x01_000000;
+const MEM_SIZE_16: usize = 0x01_0000;
+const MEM_SIZE_EZ80: usize = 0x01_000000;
 const CYCLES_PER_FRAME: u64 = 200_000;
 const CART_MAGIC: &[u8; 4] = b"EZRA";
-const HEADER_ENTRY_OFFSET: usize = 0x08;
-const HEADER_STACK_OFFSET: usize = 0x0B;
+const CART_PREFIX_SIZE: usize = CART_MAGIC.len() + 1;
+
+#[derive(Clone, Copy)]
+struct MachineConfig {
+    cpu_mode: CpuMode,
+    mem_size: usize,
+    load_addr: u32,
+    stack_top: u32,
+    framebuffer_addr: u32,
+}
+
+impl MachineConfig {
+    fn from_cart_id(id: u8) -> Option<Self> {
+        let cpu_mode = match id {
+            0 => CpuMode::I8080,
+            1 => CpuMode::I8085,
+            2 => CpuMode::Z80,
+            3 => CpuMode::Z80N,
+            4 => CpuMode::Z180,
+            5 => CpuMode::EZ80,
+            _ => return None,
+        };
+        let is_ez80 = cpu_mode == CpuMode::EZ80;
+        Some(Self {
+            cpu_mode,
+            mem_size: if is_ez80 { MEM_SIZE_EZ80 } else { MEM_SIZE_16 },
+            load_addr: if is_ez80 {
+                sdk::PROGRAM_LOAD_ADDR_EZ80
+            } else {
+                sdk::PROGRAM_LOAD_ADDR_16
+            },
+            stack_top: if is_ez80 {
+                sdk::STACK_TOP_EZ80
+            } else {
+                sdk::STACK_TOP_16
+            },
+            framebuffer_addr: if is_ez80 {
+                sdk::FRAMEBUFFER_ADDR_EZ80
+            } else {
+                sdk::FRAMEBUFFER_ADDR_16
+            },
+        })
+    }
+}
 
 pub struct Console {
     cpu: Cpu,
@@ -17,33 +60,47 @@ pub struct Console {
 
 impl Console {
     pub fn new() -> Self {
-        let mut cpu = Cpu::new_ez80();
-        cpu.state.reg.adl = true;
-        cpu.state.set_pc(sdk::PROGRAM_LOAD_ADDR);
-        cpu.state.reg.set24(ez80::Reg16::SP, sdk::STACK_TOP);
+        Self::for_config(MachineConfig::from_cart_id(5).expect("eZ80 config is defined"))
+    }
+
+    fn for_config(config: MachineConfig) -> Self {
+        let mut cpu = Cpu::new_for_mode(config.cpu_mode);
+        cpu.state.reg.adl = config.cpu_mode == CpuMode::EZ80;
+        cpu.state.set_pc(config.load_addr);
+        if config.cpu_mode == CpuMode::EZ80 {
+            cpu.state.reg.set24(Reg16::SP, config.stack_top);
+        } else {
+            cpu.state.reg.set16(Reg16::SP, config.stack_top as u16);
+        }
         let mut console = Self {
             cpu,
-            bus: Bus::new(),
+            bus: Bus::new(config.mem_size, config.framebuffer_addr),
             pixels: Box::new([0; video::PIXELS]),
             audio: [0; sound::STEREO_SAMPLES],
         };
-        console.bus.mem[sdk::FRAMEBUFFER_ADDR as usize..][..sdk::FB_SIZE].fill(b' ');
+        let framebuffer = config.framebuffer_addr as usize;
+        console.bus.mem[framebuffer..framebuffer + sdk::FB_SIZE].fill(b' ');
         console.bus.capture_frame();
         console.present();
         console
     }
 
-    pub fn load_program(&mut self, data: &[u8]) {
-        let start = sdk::PROGRAM_LOAD_ADDR as usize;
-        let available = self.bus.mem.len().saturating_sub(start);
-        let len = data.len().min(available);
-        self.bus.mem[start..start + len].copy_from_slice(&data[..len]);
-        self.cpu
-            .state
-            .set_pc(cartridge_addr24(data, HEADER_ENTRY_OFFSET).unwrap_or(sdk::PROGRAM_LOAD_ADDR));
-        if let Some(stack_top) = cartridge_addr24(data, HEADER_STACK_OFFSET) {
-            self.cpu.state.reg.set24(ez80::Reg16::SP, stack_top);
+    pub fn load_program(&mut self, data: &[u8]) -> bool {
+        if data.len() < CART_PREFIX_SIZE || data.get(..CART_MAGIC.len()) != Some(CART_MAGIC) {
+            return false;
         }
+        let Some(config) = MachineConfig::from_cart_id(data[CART_MAGIC.len()]) else {
+            return false;
+        };
+        let payload = &data[CART_PREFIX_SIZE..];
+        let start = config.load_addr as usize;
+        if payload.len() > config.mem_size.saturating_sub(start) {
+            return false;
+        }
+
+        *self = Self::for_config(config);
+        self.bus.mem[start..start + payload.len()].copy_from_slice(payload);
+        true
     }
 
     pub fn set_inputs(&mut self, inputs: [[u8; 2]; sdk::PLAYER_COUNT]) {
@@ -82,18 +139,6 @@ impl Console {
     }
 }
 
-fn cartridge_addr24(data: &[u8], offset: usize) -> Option<u32> {
-    if data.len() < offset + 3 || data.get(..4) != Some(CART_MAGIC) {
-        return None;
-    }
-
-    Some(
-        (data[offset] as u32)
-            | ((data[offset + 1] as u32) << 8)
-            | ((data[offset + 2] as u32) << 16),
-    )
-}
-
 struct Bus {
     mem: Vec<u8>,
     inputs: [[u8; 2]; sdk::PLAYER_COUNT],
@@ -101,37 +146,40 @@ struct Bus {
     tick: u8,
     presented: bool,
     presented_frame: Box<[u8; sdk::FB_SIZE]>,
+    framebuffer_addr: usize,
     cycles: u64,
 }
 
 impl Bus {
-    fn new() -> Self {
+    fn new(mem_size: usize, framebuffer_addr: u32) -> Self {
         Self {
-            mem: vec![0; MEM_SIZE],
+            mem: vec![0; mem_size],
             inputs: [[0; 2]; sdk::PLAYER_COUNT],
             sound: 0,
             tick: 0,
             presented: false,
             presented_frame: Box::new([0; sdk::FB_SIZE]),
+            framebuffer_addr: framebuffer_addr as usize,
             cycles: 0,
         }
     }
 
     fn capture_frame(&mut self) {
-        let start = sdk::FRAMEBUFFER_ADDR as usize;
-        self.presented_frame
-            .copy_from_slice(&self.mem[start..start + sdk::FB_SIZE]);
+        self.presented_frame.copy_from_slice(
+            &self.mem[self.framebuffer_addr..self.framebuffer_addr + sdk::FB_SIZE],
+        );
         self.presented = true;
     }
 }
 
 impl FastBus for Bus {
     fn read8(&mut self, addr: u32) -> u8 {
-        self.mem[addr as usize & (MEM_SIZE - 1)]
+        self.mem[addr as usize & (self.mem.len() - 1)]
     }
 
     fn write8(&mut self, addr: u32, value: u8) {
-        self.mem[addr as usize & (MEM_SIZE - 1)] = value;
+        let addr = addr as usize & (self.mem.len() - 1);
+        self.mem[addr] = value;
     }
 
     fn input8(&mut self, port: u16) -> u8 {
@@ -168,8 +216,8 @@ mod tests {
 
     #[test]
     fn present_captures_frame_at_port_write() {
-        let mut bus = Bus::new();
-        let start = sdk::FRAMEBUFFER_ADDR as usize;
+        let mut bus = Bus::new(MEM_SIZE_EZ80, sdk::FRAMEBUFFER_ADDR_EZ80);
+        let start = sdk::FRAMEBUFFER_ADDR_EZ80 as usize;
         bus.mem[start] = b'A';
 
         bus.output8(sdk::PORT_PRESENT, 0);
@@ -181,8 +229,8 @@ mod tests {
 
     #[test]
     fn latest_present_replaces_previous_snapshot() {
-        let mut bus = Bus::new();
-        let start = sdk::FRAMEBUFFER_ADDR as usize;
+        let mut bus = Bus::new(MEM_SIZE_EZ80, sdk::FRAMEBUFFER_ADDR_EZ80);
+        let start = sdk::FRAMEBUFFER_ADDR_EZ80 as usize;
         bus.mem[start] = b'A';
         bus.output8(sdk::PORT_PRESENT, 0);
 
@@ -190,5 +238,42 @@ mod tests {
         bus.output8(sdk::PORT_PRESENT, 0);
 
         assert_eq!(bus.presented_frame[0], b'B');
+    }
+
+    #[test]
+    fn cartridge_cpu_byte_selects_mode_memory_and_entry() {
+        for (id, mode, mem_size, load_addr, framebuffer_addr) in [
+            (0, CpuMode::I8080, MEM_SIZE_16, 0, sdk::FRAMEBUFFER_ADDR_16),
+            (1, CpuMode::I8085, MEM_SIZE_16, 0, sdk::FRAMEBUFFER_ADDR_16),
+            (2, CpuMode::Z80, MEM_SIZE_16, 0, sdk::FRAMEBUFFER_ADDR_16),
+            (3, CpuMode::Z80N, MEM_SIZE_16, 0, sdk::FRAMEBUFFER_ADDR_16),
+            (4, CpuMode::Z180, MEM_SIZE_16, 0, sdk::FRAMEBUFFER_ADDR_16),
+            (
+                5,
+                CpuMode::EZ80,
+                MEM_SIZE_EZ80,
+                sdk::PROGRAM_LOAD_ADDR_EZ80,
+                sdk::FRAMEBUFFER_ADDR_EZ80,
+            ),
+        ] {
+            let mut console = Console::new();
+            let cart = [b'E', b'Z', b'R', b'A', id, 0x76];
+
+            assert!(console.load_program(&cart));
+            assert_eq!(console.cpu.mode(), mode);
+            assert_eq!(console.cpu.state.pc(), load_addr);
+            assert_eq!(console.bus.mem.len(), mem_size);
+            assert_eq!(console.bus.mem[load_addr as usize], 0x76);
+            assert_eq!(console.bus.framebuffer_addr, framebuffer_addr as usize);
+            assert_eq!(console.cpu.state.reg.adl, mode == CpuMode::EZ80);
+        }
+    }
+
+    #[test]
+    fn cartridge_requires_magic_and_known_cpu() {
+        let mut console = Console::new();
+
+        assert!(!console.load_program(b"raw"));
+        assert!(!console.load_program(b"EZRA\x06"));
     }
 }

@@ -3,9 +3,12 @@ pub const CHAR_HEIGHT: usize = 9;
 pub const FB_WIDTH: usize = 80;
 pub const FB_HEIGHT: usize = 56;
 pub const FB_SIZE: usize = FB_WIDTH * FB_HEIGHT;
-pub const FRAMEBUFFER_ADDR: u32 = 0x080000;
-pub const PROGRAM_LOAD_ADDR: u32 = 0x010000;
-pub const STACK_TOP: u32 = 0xF00000;
+pub const FRAMEBUFFER_ADDR_16: u32 = 0x00E000;
+pub const FRAMEBUFFER_ADDR_EZ80: u32 = 0x080000;
+pub const PROGRAM_LOAD_ADDR_16: u32 = 0x000000;
+pub const PROGRAM_LOAD_ADDR_EZ80: u32 = 0x010000;
+pub const STACK_TOP_16: u32 = 0x00DFFF;
+pub const STACK_TOP_EZ80: u32 = 0xF00000;
 pub const PLAYER_COUNT: usize = 4;
 pub const BUTTONS_PER_PLAYER: usize = 12;
 

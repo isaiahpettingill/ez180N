@@ -11,6 +11,6 @@ dependencies = [
 
 [[package]]
 name = "ez80"
-version = "0.4.5"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbe75b75e149ce2814cb6cadaa68b2f3879b4d8e562d35ed4597c37b1c42f336"
+checksum = "235cd6b78166045bbae6a623a401ec59108d191302fb85aa96b94b48b2cccb73"

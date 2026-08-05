@@ -15,7 +15,7 @@ categories = ["emulators", "game-development"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ez80 = "0.4.5"
+ez80 = "0.5.1"
 
 [profile.release]
 codegen-units = 1

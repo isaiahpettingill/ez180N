@@ -1,6 +1,6 @@
 display_name = "ez180N"
 authors = "josemancharo"
-supported_extensions = "gaem|bin|ezra"
+supported_extensions = "gaem"
 corename = "ez180N"
 license = "BSD-3-Clause-Attribution"
 permissions = ""
