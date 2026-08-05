@@ -1,12 +1,9 @@
 use ez80::{Cpu, FastBus};
-use std::time::{Duration, Instant};
 
 use crate::{sdk, sound, video};
 
 const MEM_SIZE: usize = 0x01_000000;
-const FRAME_RATE: u64 = 60;
 const CYCLES_PER_FRAME: u64 = 200_000;
-const FRAME_DURATION: Duration = Duration::from_nanos(1_000_000_000 / FRAME_RATE);
 const CART_MAGIC: &[u8; 4] = b"EZRA";
 const HEADER_ENTRY_OFFSET: usize = 0x08;
 const HEADER_STACK_OFFSET: usize = 0x0B;
@@ -16,7 +13,6 @@ pub struct Console {
     bus: Bus,
     pixels: Box<[u32; video::PIXELS]>,
     audio: [i16; sound::STEREO_SAMPLES],
-    next_frame: Instant,
 }
 
 impl Console {
@@ -30,9 +26,9 @@ impl Console {
             bus: Bus::new(),
             pixels: Box::new([0; video::PIXELS]),
             audio: [0; sound::STEREO_SAMPLES],
-            next_frame: Instant::now(),
         };
         console.bus.mem[sdk::FRAMEBUFFER_ADDR as usize..][..sdk::FB_SIZE].fill(b' ');
+        console.bus.capture_frame();
         console.present();
         console
     }
@@ -62,7 +58,6 @@ impl Console {
         }
         self.mix_audio();
         self.bus.tick = self.bus.tick.wrapping_add(1);
-        self.wait_for_next_frame();
     }
 
     pub fn pixel_framebuffer(&self) -> &[u32] {
@@ -74,11 +69,7 @@ impl Console {
     }
 
     fn present(&mut self) {
-        let start = sdk::FRAMEBUFFER_ADDR as usize;
-        video::render(
-            &self.bus.mem[start..start + sdk::FB_SIZE],
-            &mut self.pixels[..],
-        );
+        video::render(&self.bus.presented_frame[..], &mut self.pixels[..]);
     }
 
     fn mix_audio(&mut self) {
@@ -88,17 +79,6 @@ impl Console {
             self.audio[frame * 2 + 1] = sample;
         }
         self.bus.sound = 0;
-    }
-
-    fn wait_for_next_frame(&mut self) {
-        let now = Instant::now();
-        if now < self.next_frame {
-            std::thread::sleep(self.next_frame - now);
-            self.next_frame += FRAME_DURATION;
-        } else {
-            // Avoid catch-up bursts after a slow host frame.
-            self.next_frame = now + FRAME_DURATION;
-        }
     }
 }
 
@@ -120,6 +100,7 @@ struct Bus {
     sound: u8,
     tick: u8,
     presented: bool,
+    presented_frame: Box<[u8; sdk::FB_SIZE]>,
     cycles: u64,
 }
 
@@ -131,8 +112,16 @@ impl Bus {
             sound: 0,
             tick: 0,
             presented: false,
+            presented_frame: Box::new([0; sdk::FB_SIZE]),
             cycles: 0,
         }
+    }
+
+    fn capture_frame(&mut self) {
+        let start = sdk::FRAMEBUFFER_ADDR as usize;
+        self.presented_frame
+            .copy_from_slice(&self.mem[start..start + sdk::FB_SIZE]);
+        self.presented = true;
     }
 }
 
@@ -162,7 +151,7 @@ impl FastBus for Bus {
 
     fn output8(&mut self, port: u16, value: u8) {
         match port {
-            sdk::PORT_PRESENT => self.presented = true,
+            sdk::PORT_PRESENT => self.capture_frame(),
             sdk::PORT_SOUND => self.sound = value,
             _ => {}
         }
@@ -170,5 +159,36 @@ impl FastBus for Bus {
 
     fn add_cycles(&mut self, cycles: u32) {
         self.cycles = self.cycles.wrapping_add(cycles as u64);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn present_captures_frame_at_port_write() {
+        let mut bus = Bus::new();
+        let start = sdk::FRAMEBUFFER_ADDR as usize;
+        bus.mem[start] = b'A';
+
+        bus.output8(sdk::PORT_PRESENT, 0);
+        bus.mem[start] = b'B';
+
+        assert!(bus.presented);
+        assert_eq!(bus.presented_frame[0], b'A');
+    }
+
+    #[test]
+    fn latest_present_replaces_previous_snapshot() {
+        let mut bus = Bus::new();
+        let start = sdk::FRAMEBUFFER_ADDR as usize;
+        bus.mem[start] = b'A';
+        bus.output8(sdk::PORT_PRESENT, 0);
+
+        bus.mem[start] = b'B';
+        bus.output8(sdk::PORT_PRESENT, 0);
+
+        assert_eq!(bus.presented_frame[0], b'B');
     }
 }
