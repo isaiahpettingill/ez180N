@@ -9,18 +9,27 @@ const ANSI_16: [u32; 16] = [
     0xFF808080, 0xFFFF0000, 0xFF00FF00, 0xFFFFFF00, 0xFF0000FF, 0xFFFF00FF, 0xFF00FFFF, 0xFFFFFFFF,
 ];
 
-pub fn render(chars: &[u8], pixels: &mut [u32], text_color: u8, background_color: u8) {
+pub fn render(chars: &[u8], pixels: &mut [u32], text_color: u8, background_color: u8, font_id: u8) {
     let fg = ansi_256_color(text_color);
     let bg = ansi_256_color(background_color);
+    let glyphs = font::selected(font_id);
     for cy in 0..sdk::FB_HEIGHT {
         for cx in 0..sdk::FB_WIDTH {
             let ch = chars[cy * sdk::FB_WIDTH + cx];
-            draw_char(ch, cx, cy, pixels, fg, bg);
+            draw_char(ch, cx, cy, pixels, fg, bg, glyphs);
         }
     }
 }
 
-fn draw_char(ch: u8, cx: usize, cy: usize, pixels: &mut [u32], fg: u32, bg: u32) {
+fn draw_char(
+    ch: u8,
+    cx: usize,
+    cy: usize,
+    pixels: &mut [u32],
+    fg: u32,
+    bg: u32,
+    glyphs: &font::Font,
+) {
     for row in 0..sdk::CHAR_HEIGHT {
         let y = cy * sdk::CHAR_HEIGHT + row;
         let start = y * PIXEL_WIDTH + cx * sdk::CHAR_WIDTH;
@@ -30,7 +39,7 @@ fn draw_char(ch: u8, cx: usize, cy: usize, pixels: &mut [u32], fg: u32, bg: u32)
                 continue;
             }
 
-            let bits = font::VGA_8X8[ch as usize][row];
+            let bits = glyphs[ch as usize][row];
             let mask = 0x80 >> col;
             pixels[start + col] = if bits & mask != 0 { fg } else { bg };
         }
@@ -83,10 +92,22 @@ mod tests {
         let chars = vec![sdk::CP437_FULL_BLOCK; sdk::FB_SIZE];
         let mut pixels = vec![0; PIXELS];
 
-        render(&chars, &mut pixels, 196, 21);
+        render(&chars, &mut pixels, 196, 21, sdk::FONT_VGA_8X8);
 
         assert_eq!(pixels[0], 0xFFFF0000);
         assert_eq!(pixels[sdk::CHAR_WIDTH - 1], 0xFF0000FF);
         assert_eq!(pixels[(sdk::CHAR_HEIGHT - 1) * PIXEL_WIDTH], 0xFF0000FF);
+    }
+
+    #[test]
+    fn generated_font_tables_are_selectable() {
+        assert_ne!(
+            font::selected(sdk::FONT_VGA_8X8)[b'A' as usize],
+            font::selected(sdk::FONT_BBC_MASTER)[b'A' as usize]
+        );
+        assert_eq!(
+            font::selected(255)[b'A' as usize],
+            font::selected(sdk::FONT_VGA_8X8)[b'A' as usize]
+        );
     }
 }

@@ -131,6 +131,7 @@ impl Console {
             &mut self.pixels[..],
             self.bus.presented_text_color,
             self.bus.presented_background_color,
+            self.bus.presented_font,
         );
     }
 
@@ -155,6 +156,8 @@ struct Bus {
     background_color: u8,
     presented_text_color: u8,
     presented_background_color: u8,
+    font: u8,
+    presented_font: u8,
     framebuffer_addr: usize,
     cycles: u64,
 }
@@ -172,6 +175,8 @@ impl Bus {
             background_color: sdk::DEFAULT_BACKGROUND_COLOR,
             presented_text_color: sdk::DEFAULT_TEXT_COLOR,
             presented_background_color: sdk::DEFAULT_BACKGROUND_COLOR,
+            font: sdk::FONT_VGA_8X8,
+            presented_font: sdk::FONT_VGA_8X8,
             framebuffer_addr: framebuffer_addr as usize,
             cycles: 0,
         }
@@ -183,6 +188,7 @@ impl Bus {
         );
         self.presented_text_color = self.text_color;
         self.presented_background_color = self.background_color;
+        self.presented_font = self.font;
         self.presented = true;
     }
 }
@@ -217,6 +223,7 @@ impl FastBus for Bus {
             sdk::PORT_PRESENT => self.capture_frame(),
             sdk::PORT_TEXT_COLOR => self.text_color = value,
             sdk::PORT_BACKGROUND_COLOR => self.background_color = value,
+            sdk::PORT_FONT if value < sdk::FONT_COUNT => self.font = value,
             sdk::PORT_SOUND => self.sound = value,
             _ => {}
         }
@@ -258,17 +265,20 @@ mod tests {
     }
 
     #[test]
-    fn present_captures_text_and_background_colors() {
+    fn present_captures_text_background_and_font() {
         let mut bus = Bus::new(MEM_SIZE_EZ80, sdk::FRAMEBUFFER_ADDR_EZ80);
         bus.output8(sdk::PORT_TEXT_COLOR, 196);
         bus.output8(sdk::PORT_BACKGROUND_COLOR, 21);
+        bus.output8(sdk::PORT_FONT, sdk::FONT_C64);
         bus.output8(sdk::PORT_PRESENT, 0);
 
         bus.output8(sdk::PORT_TEXT_COLOR, 46);
         bus.output8(sdk::PORT_BACKGROUND_COLOR, 232);
+        bus.output8(sdk::PORT_FONT, sdk::FONT_BBC_MICRO);
 
         assert_eq!(bus.presented_text_color, 196);
         assert_eq!(bus.presented_background_color, 21);
+        assert_eq!(bus.presented_font, sdk::FONT_C64);
     }
 
     #[test]
@@ -317,11 +327,13 @@ mod tests {
         assert_eq!(bus.input8(0xAB40), 0x42);
         bus.output8(0xAB11, 196);
         bus.output8(0xAB12, 21);
+        bus.output8(0xAB13, sdk::FONT_C16);
         bus.output8(0x0110, 1);
 
         assert!(bus.presented);
         assert_eq!(bus.presented_text_color, 196);
         assert_eq!(bus.presented_background_color, 21);
+        assert_eq!(bus.presented_font, sdk::FONT_C16);
         assert_eq!(bus.presented_frame[0], b'X');
     }
 

@@ -17,6 +17,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ez80 = "0.5.1"
 
+[build-dependencies]
+libyaff = "0.1.2"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
