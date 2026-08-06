@@ -8,7 +8,7 @@
 - Timing: fixed 60 Hz execution, with 200,000 CPU cycles per frame (12 MHz).
 - Memory: 64 KiB for 8080, 8085, Z80, Z80N, and Z180 cartridges; 16 MiB for eZ80 ADL cartridges.
 - Framebuffer: `80x56` bytes at `0xE000` on 16-bit CPUs or `0x080000` on eZ80; each byte is a CP437 character rendered with the IBM VGA 8x8 font in a 9x9 cell.
-- Video output: `720x504` XRGB8888, generated from the character framebuffer when software writes to the present port.
+- Video output: `720x504` XRGB8888, generated from the character framebuffer with selectable ANSI 256-color text and background colors when software writes to the present port.
 - Controllers: four SNES-style joypads, exposed as two 8-bit input ports per player for 12 buttons.
 - Audio: write sound IDs `0..255` to the beeper port. `0` is silence; `1..255` select compile-time generated beep, oscillation, pulse, and sine variants.
 
@@ -16,13 +16,17 @@
 
 | Port | Direction | Meaning |
 | ---: | --- | --- |
-| `0x10` | out | Present framebuffer |
+| `0x10` | out | Present framebuffer and current colors |
+| `0x11` | out | Set text color (`0..255` ANSI palette index) |
+| `0x12` | out | Set full-cell background color (`0..255` ANSI palette index) |
 | `0x20` | out | Play sound ID (`0` silence) |
 | `0x30`, `0x31` | in | Player 1 buttons low/high |
 | `0x32`, `0x33` | in | Player 2 buttons low/high |
 | `0x34`, `0x35` | in | Player 3 buttons low/high |
 | `0x36`, `0x37` | in | Player 4 buttons low/high |
 | `0x40` | in | 60 Hz frame tick (8-bit, wraps) |
+
+Color ports use the standard ANSI/xterm 256-color palette: indexes `0..15` are system colors, `16..231` are the 6×6×6 color cube, and `232..255` are grayscale. Text defaults to `254` and the background defaults to `233`, closely matching the original console colors. Color changes appear on the next framebuffer present.
 
 Button bit order is `B, Y, Select, Start, Up, Down, Left, Right, A, X, L, R`.
 

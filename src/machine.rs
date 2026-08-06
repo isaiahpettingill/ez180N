@@ -126,7 +126,12 @@ impl Console {
     }
 
     fn present(&mut self) {
-        video::render(&self.bus.presented_frame[..], &mut self.pixels[..]);
+        video::render(
+            &self.bus.presented_frame[..],
+            &mut self.pixels[..],
+            self.bus.presented_text_color,
+            self.bus.presented_background_color,
+        );
     }
 
     fn mix_audio(&mut self) {
@@ -146,6 +151,10 @@ struct Bus {
     tick: u8,
     presented: bool,
     presented_frame: Box<[u8; sdk::FB_SIZE]>,
+    text_color: u8,
+    background_color: u8,
+    presented_text_color: u8,
+    presented_background_color: u8,
     framebuffer_addr: usize,
     cycles: u64,
 }
@@ -159,6 +168,10 @@ impl Bus {
             tick: 0,
             presented: false,
             presented_frame: Box::new([0; sdk::FB_SIZE]),
+            text_color: sdk::DEFAULT_TEXT_COLOR,
+            background_color: sdk::DEFAULT_BACKGROUND_COLOR,
+            presented_text_color: sdk::DEFAULT_TEXT_COLOR,
+            presented_background_color: sdk::DEFAULT_BACKGROUND_COLOR,
             framebuffer_addr: framebuffer_addr as usize,
             cycles: 0,
         }
@@ -168,6 +181,8 @@ impl Bus {
         self.presented_frame.copy_from_slice(
             &self.mem[self.framebuffer_addr..self.framebuffer_addr + sdk::FB_SIZE],
         );
+        self.presented_text_color = self.text_color;
+        self.presented_background_color = self.background_color;
         self.presented = true;
     }
 }
@@ -200,6 +215,8 @@ impl FastBus for Bus {
     fn output8(&mut self, port: u16, value: u8) {
         match port & 0x00FF {
             sdk::PORT_PRESENT => self.capture_frame(),
+            sdk::PORT_TEXT_COLOR => self.text_color = value,
+            sdk::PORT_BACKGROUND_COLOR => self.background_color = value,
             sdk::PORT_SOUND => self.sound = value,
             _ => {}
         }
@@ -238,6 +255,20 @@ mod tests {
         bus.output8(sdk::PORT_PRESENT, 0);
 
         assert_eq!(bus.presented_frame[0], b'B');
+    }
+
+    #[test]
+    fn present_captures_text_and_background_colors() {
+        let mut bus = Bus::new(MEM_SIZE_EZ80, sdk::FRAMEBUFFER_ADDR_EZ80);
+        bus.output8(sdk::PORT_TEXT_COLOR, 196);
+        bus.output8(sdk::PORT_BACKGROUND_COLOR, 21);
+        bus.output8(sdk::PORT_PRESENT, 0);
+
+        bus.output8(sdk::PORT_TEXT_COLOR, 46);
+        bus.output8(sdk::PORT_BACKGROUND_COLOR, 232);
+
+        assert_eq!(bus.presented_text_color, 196);
+        assert_eq!(bus.presented_background_color, 21);
     }
 
     #[test]
@@ -284,9 +315,13 @@ mod tests {
         bus.mem[sdk::FRAMEBUFFER_ADDR_16 as usize] = b'X';
 
         assert_eq!(bus.input8(0xAB40), 0x42);
+        bus.output8(0xAB11, 196);
+        bus.output8(0xAB12, 21);
         bus.output8(0x0110, 1);
 
         assert!(bus.presented);
+        assert_eq!(bus.presented_text_color, 196);
+        assert_eq!(bus.presented_background_color, 21);
         assert_eq!(bus.presented_frame[0], b'X');
     }
 

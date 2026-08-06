@@ -13,6 +13,8 @@ pub const PLAYER_COUNT: usize = 4;
 pub const BUTTONS_PER_PLAYER: usize = 12;
 
 pub const PORT_PRESENT: u16 = 0x10;
+pub const PORT_TEXT_COLOR: u16 = 0x11;
+pub const PORT_BACKGROUND_COLOR: u16 = 0x12;
 pub const PORT_SOUND: u16 = 0x20;
 pub const PORT_TICK: u16 = 0x40;
 pub const PORT_P1_LOW: u16 = 0x30;
@@ -36,6 +38,9 @@ pub const BUTTON_A: u8 = 8;
 pub const BUTTON_X: u8 = 9;
 pub const BUTTON_L: u8 = 10;
 pub const BUTTON_R: u8 = 11;
+
+pub const DEFAULT_TEXT_COLOR: u8 = 254;
+pub const DEFAULT_BACKGROUND_COLOR: u8 = 233;
 
 pub const CP437_NUL: u8 = 0x00;
 pub const CP437_FACE_WHITE: u8 = 0x01;
