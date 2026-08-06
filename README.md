@@ -129,7 +129,7 @@ For a full screen, the cell address is `FRAMEBUFFER_BASE + y * 80 + x`. On Z80-f
 
 ## Font tables, encodings, and sources
 
-The tables are vendored from [robhagemans/hoard-of-bitfonts](https://github.com/robhagemans/hoard-of-bitfonts). The checked-in byte tables are generated from the YAFF files and checked at build time with [libyaff](https://docs.rs/libyaff/latest/libyaff/). Encoding labels below describe the source font's byte order or character set; they do not add runtime Unicode conversion.
+The tables are vendored from [robhagemans/hoard-of-bitfonts](https://github.com/robhagemans/hoard-of-bitfonts). The procedural macro parses the YAFF files with [libyaff](https://docs.rs/libyaff/latest/libyaff/) during compilation and expands typed Rust `Font` constants. Rust then type-checks every generated 256-glyph table. Encoding labels below describe the source font's byte order or character set; they do not add runtime Unicode conversion.
 
 | Value | Font | Encoding / byte mapping | Encoding reference | Original YAFF |
 | ---: | --- | --- | --- | --- |

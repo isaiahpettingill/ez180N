@@ -6,7 +6,14 @@ version = 4
 name = "ez180n"
 version = "0.1.0"
 dependencies = [
+ "ez180n-font-macro",
  "ez80",
+]
+
+[[package]]
+name = "ez180n-font-macro"
+version = "0.1.0"
+dependencies = [
  "libyaff",
 ]
 

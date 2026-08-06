@@ -16,9 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ez80 = "0.5.1"
-
-[build-dependencies]
-libyaff = "0.1.2"
+ez180n-font-macro = { path = "font-macro" }
 
 [profile.release]
 codegen-units = 1
