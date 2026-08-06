@@ -56,6 +56,8 @@ pub struct Console {
     bus: Bus,
     pixels: Box<[u32; video::PIXELS]>,
     audio: [i16; sound::STEREO_SAMPLES],
+    config: MachineConfig,
+    program: Vec<u8>,
 }
 
 impl Console {
@@ -77,6 +79,8 @@ impl Console {
             bus: Bus::new(config.mem_size, config.framebuffer_addr),
             pixels: Box::new([0; video::PIXELS]),
             audio: [0; sound::STEREO_SAMPLES],
+            config,
+            program: Vec::new(),
         };
         let framebuffer = config.framebuffer_addr as usize;
         console.bus.mem[framebuffer..framebuffer + sdk::FB_SIZE].fill(b' ');
@@ -100,7 +104,17 @@ impl Console {
 
         *self = Self::for_config(config);
         self.bus.mem[start..start + payload.len()].copy_from_slice(payload);
+        self.program.extend_from_slice(payload);
         true
+    }
+
+    pub fn reset(&mut self) {
+        let config = self.config;
+        let program = self.program.clone();
+        *self = Self::for_config(config);
+        let start = config.load_addr as usize;
+        self.bus.mem[start..start + program.len()].copy_from_slice(&program);
+        self.program = program;
     }
 
     pub fn set_inputs(&mut self, inputs: [[u8; 2]; sdk::PLAYER_COUNT]) {
@@ -316,6 +330,22 @@ mod tests {
 
         assert!(!console.load_program(b"raw"));
         assert!(!console.load_program(b"EZRA\x06"));
+    }
+
+    #[test]
+    fn reset_restarts_the_loaded_cartridge() {
+        let mut console = Console::new();
+        let cart = [b'E', b'Z', b'R', b'A', 2, 0x76];
+
+        assert!(console.load_program(&cart));
+        console.bus.mem[sdk::FRAMEBUFFER_ADDR_16 as usize] = b'X';
+        console.bus.tick = 42;
+        console.reset();
+
+        assert_eq!(console.cpu.state.pc(), sdk::PROGRAM_LOAD_ADDR_16);
+        assert_eq!(console.bus.tick, 0);
+        assert_eq!(console.bus.mem[sdk::PROGRAM_LOAD_ADDR_16 as usize], 0x76);
+        assert_eq!(console.bus.mem[sdk::FRAMEBUFFER_ADDR_16 as usize], b' ');
     }
 
     #[test]

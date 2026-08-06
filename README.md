@@ -170,7 +170,7 @@ The shared library in `target/release` is the libretro core. ez180N game cartrid
 
 ## Releases
 
-Every push to `master` builds all supported cores and refreshes the rolling `nightly` Forgejo release. Pushing a version tag such as `v0.1.1` publishes a versioned release containing:
+Every push to `master` builds all supported cores and refreshes the rolling `nightly` Forgejo release. Pushing a version tag such as `v0.1.2` publishes a versioned release containing:
 
 | Platform | Architectures |
 | --- | --- |

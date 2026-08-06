@@ -1,6 +1,6 @@
 [package]
 name = "ez180n"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["josemancharo"]
 description = "Libretro fantasy console core powered by the ez80 crate"

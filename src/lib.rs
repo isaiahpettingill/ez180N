@@ -76,7 +76,7 @@ pub extern "C" fn retro_get_system_info(info: *mut retro_system_info) {
     unsafe {
         *info = retro_system_info {
             library_name: c"ez180N".as_ptr(),
-            library_version: c"0.1.1".as_ptr(),
+            library_version: c"0.1.2".as_ptr(),
             valid_extensions: c"gaem".as_ptr(),
             need_fullpath: false,
             block_extract: false,
@@ -111,7 +111,14 @@ pub extern "C" fn retro_set_controller_port_device(_port: u32, _device: u32) {}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retro_reset() {
-    unsafe { CORE = Some(Console::new()) }
+    unsafe {
+        let core_slot = &raw mut CORE;
+        if let Some(core) = (*core_slot).as_mut() {
+            core.reset();
+        } else {
+            CORE = Some(Console::new());
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
